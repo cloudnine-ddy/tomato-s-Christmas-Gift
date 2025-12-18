@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tomato's Christmas Gift 🎄</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Intro Screen -->
+    <div id="intro-screen">
+        <div id="intro-text"></div>
+        <div id="intro-hint">Make an OK gesture 👌 to continue...</div>
+    </div>
+
+    <!-- Main Stage: 3D Scene -->
+    <div id="scene-container">
+        <canvas id="three-canvas"></canvas>
+    </div>
+
+    <!-- Finale Prompt -->
+    <div id="finale-prompt" class="hidden">
+        Show Thumbs Up 👍 to unlock the final gift
+    </div>
+
+    <!-- Instruction Modal -->
+    <div id="instruction-modal" class="hidden">
+        <div class="instruction-content">
+            <div id="instruction-text"></div>
+        </div>
+    </div>
+
+    <!-- Status UI (Hidden) -->
+    <div id="ui-layer" style="display: none;">
+        <div class="game-info">
+            <div class="collected-count">0/6 Collected</div>
+            <div class="hint">Make hand gestures to find letters!</div>
+            <div id="hold-feedback" class="hold-feedback" style="display: none;"></div>
+        </div>
+    </div>
+
+    <!-- Camera PIP (Bottom Right) -->
+    <div id="camera-pip">
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="output_canvas"></canvas>
+    </div>
+
+    <!-- Modal Popup -->
+    <div id="modal" class="modal hidden">
+        <div class="modal-content">
+            <h2 id="modal-title">You found a letter!</h2>
+            <p id="modal-text">Content placeholder</p>
+            <button id="modal-close">Continue (Space)</button>
+        </div>
+    </div>
+
+    <!-- Finale Container -->
+    <div id="finale-container" class="hidden">
+        <h1>🎄 I LOVE U 🎄</h1>
+        <div id="photo-grid"></div>
+        <p class="finale-message">Merry Christmas! ❤️</p>
+    </div>
+
+    <script type="module" src="main.js"></script>
+</body>
+</html>
