@@ -20,7 +20,7 @@
 
     <!-- Finale Prompt -->
     <div id="finale-prompt" class="hidden">
-        Show Thumbs Up 👍 to unlock the final gift
+        Press the final gesture to unlock the final gift
     </div>
 
     <!-- Instruction Modal -->
@@ -60,6 +60,67 @@
         <div id="photo-grid"></div>
         <p class="finale-message">Merry Christmas! ❤️</p>
     </div>
+
+    <!-- Gesture HUD: Collection Bar (six plain dots) -->
+    <div id="gesture-hud" aria-hidden="false">
+        <div class="hud-item" data-letter="I"><div class="hud-circle"></div></div>
+        <div class="hud-item" data-letter="L"><div class="hud-circle"></div></div>
+        <div class="hud-item" data-letter="O"><div class="hud-circle"></div></div>
+        <div class="hud-item" data-letter="V"><div class="hud-circle"></div></div>
+        <div class="hud-item" data-letter="E"><div class="hud-circle"></div></div>
+        <div class="hud-item" data-letter="U"><div class="hud-circle"></div></div>
+    </div>
+
+    <!-- Photo Animation Modal (hidden) -->
+    <div id="photo-animation-modal" class="hidden" role="dialog" aria-modal="true">
+        <div class="photo-animation-content">
+            <img id="photo-animation-img" src="" alt="Animation frame">
+            <div id="photo-animation-caption" class="photo-caption"> </div>
+        </div>
+    </div>
+
+    <!-- Voice Surprise Modal -->
+    <div id="voice-modal" class="hidden" role="dialog" aria-modal="true">
+        <div class="voice-modal-content">
+            <button id="voice-play-btn" class="voice-play" aria-label="Play voice message"></button>
+            <div id="voice-caption" class="photo-caption"></div>
+        </div>
+    </div>
+
+    <!-- Runaway Button Surprise Modal -->
+    <div id="runaway-modal" class="hidden" role="dialog" aria-modal="true">
+        <div class="runaway-content">
+            <h2 id="runaway-question">谁是shabi？</h2>
+            <div id="runaway-area" class="runaway-area">
+                <div class="runaway-buttons" id="runaway-buttons">
+                    <button id="run-btn-a" class="run-btn">我</button>
+                    <button id="run-btn-b" class="run-btn">你</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Angel Surprise Modal -->
+    <div id="angel-modal" class="hidden" role="dialog" aria-modal="true">
+        <div class="angel-overlay">
+            <div class="angel-content">
+                <img id="angel-img" src="" alt="Angel" />
+                <div id="angel-caption" class="photo-caption"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Letter Surprise Modal (Surprise 5: My Sincere Words) -->
+    <div id="letter-modal" class="hidden" role="dialog" aria-modal="true">
+        <div class="letter-overlay">
+            <div class="letter-content">
+                <div id="letter-text" class="letter-text" tabindex="0"></div>
+                <div class="letter-hint">Click the text to finish typing. Press Space to close.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Final photo is shown on the separate merry_christmas.html page -->
 
     <script type="module" src="main.js"></script>
 </body>

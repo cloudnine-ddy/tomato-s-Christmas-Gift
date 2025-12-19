@@ -68,6 +68,40 @@ let introComplete = false;
 let isFinaleReady = false;
 let sessionId = Date.now().toString();
 
+// Story Mode: map gestures to dot indices and manage surprise queue
+const GESTURE_TO_INDEX = { I: 0, L: 1, O: 2, V: 3, E: 4, U: 5 };
+const surprises = ['Animation', 'Voice', 'RunawayBtn', 'Angel', 'TrueWords', 'LightStar'];
+let currentStoryStep = 0;
+
+// Photo animation assets (assume .jpg files in public/animation-photos/1.jpg ... 9.jpg)
+// Base path for static assets (change if your server serves assets from a different root)
+const BASE_PATH = '/animation-photos';
+const IMAGE_EXT = '.jpg';
+const ANIMATION_PHOTOS = Array.from({ length: 9 }, (_, i) => `${BASE_PATH}/${i + 1}${IMAGE_EXT}`);
+let _preloadedAnimationImages = [];
+let _animationIntervalId = null;
+let _animationIndex = 0;
+let _animationKeyHandler = null;
+let lastSurpriseClose = 0;
+const SURPRISE_COOLDOWN = 1500; // ms cooldown after closing a surprise modal
+// Voice assets and state
+const VOICE_AUDIO_SRC = '/voice_2.mp3';
+const VOICE_CAPTION_SRC = '/caption_2.txt';
+let _voiceAudio = null;
+let _voiceKeyHandler = null;
+let _voicePlayHandler = null;
+// Angel assets/state
+const ANGEL_IMG_SRC = '/angel.png';
+const ANGEL_CAPTION_SRC = '/caption_4.txt';
+let _angelKeyHandler = null;
+let _angelPreloaded = null;
+// Letter modal (Surprise 5) state
+let _letterIntervalId = null;
+let _letterFullText = '';
+let _letterIndex = 0;
+let _letterKeyHandler = null;
+let _letterClickHandler = null;
+
 // Hand tracking for camera control (swipe/drag with inertia)
 let previousHandX = null;
 let targetRotation = 0;
@@ -96,6 +130,8 @@ async function init() {
         setup3DScene();
         await load3DModels();
         await loadMediaPipe();
+        // Start preloading animation photos
+        try { await preloadAnimationPhotos(); console.log('📸 Animation photos preloaded'); } catch(e) { console.warn('Failed preloading animation photos', e); }
         setupEventListeners();
         startRenderLoop();
         start3DLoop();
@@ -104,10 +140,564 @@ async function init() {
         await loadAndTypeIntro();
         
         console.log('✨ Game initialized!');
+        // Sync HUD state (in case of pre-collected items)
+        try {
+            for (const ch of GESTURE_SEQUENCE) {
+                const el = document.querySelector(`.hud-item[data-letter="${ch}"]`);
+                if (el && collectedGestures[ch]) el.classList.add('active');
+            }
+        } catch (e) {
+            // ignore if DOM not ready
+        }
     } catch (error) {
         console.error('Failed to initialize:', error);
         showError('Unable to access camera. Please allow camera permissions.');
     }
+}
+
+// --- Photo Animation: preload, start, stop ---
+function preloadAnimationPhotos() {
+    return new Promise((resolve, reject) => {
+        const images = [];
+        let loaded = 0;
+        const total = ANIMATION_PHOTOS.length;
+
+        if (total === 0) return resolve([]);
+
+        ANIMATION_PHOTOS.forEach((src, idx) => {
+            const img = new Image();
+            img.onload = () => {
+                loaded++;
+                images[idx] = img;
+                if (loaded === total) {
+                    _preloadedAnimationImages = images;
+                    resolve(images);
+                }
+            };
+            img.onerror = (e) => {
+                console.error('Failed to preload animation image:', src, e);
+                // still count as loaded to avoid hanging
+                loaded++;
+                images[idx] = img;
+                if (loaded === total) {
+                    _preloadedAnimationImages = images;
+                    resolve(images);
+                }
+            };
+            img.src = src;
+        });
+    });
+}
+
+async function startPhotoAnimation() {
+    // Ensure modal and img exist
+    const modalEl = document.getElementById('photo-animation-modal');
+    const imgEl = document.getElementById('photo-animation-img');
+    const captionEl = document.getElementById('photo-animation-caption');
+    if (!modalEl || !imgEl || !captionEl) return;
+
+    // Attempt to fetch caption asynchronously (non-blocking on failure)
+    try {
+        const res = await fetch('/caption_1.txt');
+        if (res.ok) {
+            const txt = await res.text();
+            captionEl.textContent = txt.trim();
+        } else {
+            captionEl.textContent = '';
+        }
+    } catch (e) {
+        captionEl.textContent = '';
+        console.warn('Failed to fetch caption_1.txt', e);
+    }
+
+    // Reset index
+    _animationIndex = 0;
+
+    // If we have preloaded images, use their srcs; otherwise use ANIMATION_PHOTOS
+    const frames = (_preloadedAnimationImages && _preloadedAnimationImages.length) ? _preloadedAnimationImages.map(i => i.src) : ANIMATION_PHOTOS;
+
+    // Show modal
+    modalEl.classList.remove('hidden');
+    modalEl.classList.add('visible');
+
+    // Start cycling
+    imgEl.src = frames[_animationIndex % frames.length];
+    // Log if image fails to load (shows alt text) so we can debug path issues
+    imgEl.onerror = () => {
+        console.error('Failed to load image:', imgEl.src);
+    };
+    _animationIntervalId = setInterval(() => {
+        _animationIndex = (_animationIndex + 1) % frames.length;
+        imgEl.src = frames[_animationIndex];
+    }, 200);
+
+    // Click outside image closes modal and stops animation
+    const onModalClick = (e) => {
+        if (e.target === modalEl) {
+            stopPhotoAnimation();
+            modalEl.removeEventListener('click', onModalClick);
+        }
+    };
+    modalEl.addEventListener('click', onModalClick);
+
+    // Spacebar key closes modal while animation is active
+    _animationKeyHandler = function (e) {
+        if (e.code === 'Space') {
+            e.preventDefault();
+            stopPhotoAnimation();
+        }
+    };
+    document.addEventListener('keydown', _animationKeyHandler);
+}
+
+function stopPhotoAnimation() {
+    const modalEl = document.getElementById('photo-animation-modal');
+    const imgEl = document.getElementById('photo-animation-img');
+    if (_animationIntervalId) {
+        clearInterval(_animationIntervalId);
+        _animationIntervalId = null;
+    }
+    if (imgEl) imgEl.src = '';
+    if (modalEl) {
+        modalEl.classList.remove('visible');
+        modalEl.classList.add('hidden');
+    }
+    // Remove key handler if present
+    if (_animationKeyHandler) {
+        document.removeEventListener('keydown', _animationKeyHandler);
+        _animationKeyHandler = null;
+    }
+    // Return focus to window
+    try { window.focus(); } catch (e) {}
+    // resume gesture processing after a short cooldown
+    isPaused = false;
+    lastSurpriseClose = Date.now();
+}
+
+// --- Voice Modal: start/stop, play/pause ---
+async function startVoiceModal() {
+    const modalEl = document.getElementById('voice-modal');
+    const btn = document.getElementById('voice-play-btn');
+    const captionEl = document.getElementById('voice-caption');
+    if (!modalEl || !btn || !captionEl) return;
+
+    // Fetch caption (non-fatal)
+    try {
+        const res = await fetch(VOICE_CAPTION_SRC);
+        if (res.ok) captionEl.textContent = (await res.text()).trim(); else captionEl.textContent = '';
+    } catch (e) {
+        console.warn('Failed to fetch voice caption', e);
+        captionEl.textContent = '';
+    }
+
+    // Prepare audio element (but do not autoplay)
+    try {
+        _voiceAudio = new Audio(VOICE_AUDIO_SRC);
+        _voiceAudio.preload = 'auto';
+        _voiceAudio.pause();
+        _voiceAudio.currentTime = 0;
+    } catch (e) {
+        console.warn('Could not create audio element', e);
+        _voiceAudio = null;
+    }
+
+    // Show modal
+    modalEl.classList.remove('hidden');
+    modalEl.classList.add('visible');
+
+    // Play button handler
+    _voicePlayHandler = async function () {
+        if (!_voiceAudio) return;
+        if (_voiceAudio.paused) {
+            try {
+                await _voiceAudio.play();
+                btn.classList.add('playing');
+            } catch (e) {
+                console.warn('Play failed', e);
+            }
+        } else {
+            _voiceAudio.pause();
+            _voiceAudio.currentTime = 0;
+            btn.classList.remove('playing');
+        }
+    };
+    btn.addEventListener('click', _voicePlayHandler);
+
+    // When audio ends, reset button
+    if (_voiceAudio) _voiceAudio.addEventListener('ended', () => { btn.classList.remove('playing'); _voiceAudio.currentTime = 0; });
+
+    // Click outside content closes modal
+    const onModalClick = (e) => {
+        if (e.target === modalEl) {
+            stopVoiceModal();
+            modalEl.removeEventListener('click', onModalClick);
+        }
+    };
+    modalEl.addEventListener('click', onModalClick);
+
+    // Spacebar handler (scoped to voice modal)
+    _voiceKeyHandler = function (e) {
+        if (e.code === 'Space') {
+            e.preventDefault();
+            stopVoiceModal();
+        }
+    };
+    document.addEventListener('keydown', _voiceKeyHandler);
+}
+
+// --- Runaway Modal: 3-stage trick game ---
+async function startRunawayModal() {
+    const modalEl = document.getElementById('runaway-modal');
+    const questionEl = document.getElementById('runaway-question');
+    const area = document.getElementById('runaway-area');
+    const buttonsWrap = document.getElementById('runaway-buttons');
+    const btnA = document.getElementById('run-btn-a');
+    const btnB = document.getElementById('run-btn-b');
+    if (!modalEl || !area || !buttonsWrap || !btnA || !btnB) return;
+
+    // Internal stage state
+    let stage = 1;
+
+    // Show modal (do NOT attach spacebar or background close for this modal)
+    modalEl.classList.remove('hidden');
+    modalEl.classList.add('visible');
+
+    // Reset button states and positions
+    resetRunButtons();
+
+    // Stage 1 setup
+    questionEl.textContent = '谁是shabi？';
+    btnA.textContent = '我'; btnA.className = 'run-btn primary';
+    btnB.textContent = '你'; btnB.className = 'run-btn danger';
+
+    // btnB runaway on hover
+    const onBHoverStage1 = (e) => {
+        makeButtonRunaway(btnB, buttonsWrap);
+    };
+    btnB.addEventListener('mouseover', onBHoverStage1);
+
+    // btnA click -> advance to stage 2
+    const onAClickStage1 = () => {
+        // cleanup stage1 handlers
+        btnB.removeEventListener('mouseover', onBHoverStage1);
+        btnA.removeEventListener('click', onAClickStage1);
+        // advance
+        stage = 2;
+        setupStage2();
+    };
+    btnA.addEventListener('click', onAClickStage1);
+
+    // Stage 2 setup function
+    function setupStage2() {
+        questionEl.textContent = 'Jorden爱你吗？';
+        // Reset layout: put buttons inline center
+        resetRunButtons();
+        btnA.textContent = '爱'; btnA.className = 'run-btn primary';
+        btnB.textContent = '不爱'; btnB.className = 'run-btn danger';
+
+        // btnA click shows small toast (non-blocking)
+        const onAClick2 = () => {
+            // small visual feedback - console log
+            console.log('再想想 / Think again');
+        };
+        btnA.addEventListener('click', onAClick2);
+
+        // btnB hover -> change text to '超级爱' and color
+        const onBHover2 = () => {
+            btnB.textContent = '超级爱';
+            btnB.style.background = '#ec4899';
+            btnB.style.color = '#fff';
+            // clicking now advances
+            const onBClick2 = () => {
+                btnB.removeEventListener('click', onBClick2);
+                btnA.removeEventListener('click', onAClick2);
+                btnB.removeEventListener('mouseover', onBHover2);
+                stage = 3;
+                setupStage3();
+            };
+            btnB.addEventListener('click', onBClick2);
+        };
+        btnB.addEventListener('mouseover', onBHover2);
+    }
+
+    // Stage 3 setup
+    function setupStage3() {
+        questionEl.textContent = '你爱Jorden吗？';
+        resetRunButtons();
+        btnA.textContent = '很爱'; btnA.className = 'run-btn danger';
+        btnB.textContent = '超级无敌爱'; btnB.className = 'run-btn primary';
+
+        // Make btnA runaway (optional) - on hover move it away
+        const onAHover3 = () => makeButtonRunaway(btnA, buttonsWrap);
+        btnA.addEventListener('mouseover', onAHover3);
+
+        // btnB is victory
+        const onBClick3 = () => {
+            // Victory: close modal and resume
+            btnA.removeEventListener('mouseover', onAHover3);
+            btnB.removeEventListener('click', onBClick3);
+            stopRunawayModal();
+        };
+        btnB.addEventListener('click', onBClick3);
+    }
+
+    // Reset buttons to inline centered (remove absolute positioning)
+    function resetRunButtons() {
+        [btnA, btnB].forEach(b => {
+            b.classList.remove('runaway');
+            b.style.left = '';
+            b.style.top = '';
+            b.style.position = '';
+            b.style.background = '';
+            b.style.color = '';
+        });
+        // ensure buttonsWrap is cleared
+        buttonsWrap.style.position = 'relative';
+    }
+
+    // Helper to move a button to a random position within container
+    function makeButtonRunaway(button, container) {
+        const containerRect = container.getBoundingClientRect();
+        const btnRect = button.getBoundingClientRect();
+        const padding = 8; // keep some padding
+        const maxLeft = Math.max(0, containerRect.width - btnRect.width - padding);
+        const maxTop = Math.max(0, containerRect.height - btnRect.height - padding);
+        const left = Math.floor(Math.random() * maxLeft);
+        const top = Math.floor(Math.random() * maxTop);
+        button.classList.add('runaway');
+        button.style.position = 'absolute';
+        button.style.left = `${left}px`;
+        button.style.top = `${top}px`;
+    }
+}
+
+function stopRunawayModal() {
+    const modalEl = document.getElementById('runaway-modal');
+    if (modalEl) {
+        modalEl.classList.remove('visible');
+        modalEl.classList.add('hidden');
+    }
+    // Allow gameplay to resume
+    isPaused = false;
+    lastSurpriseClose = Date.now();
+    updateUI();
+}
+
+// --- Angel Modal ---
+async function startAngelModal() {
+    const modalEl = document.getElementById('angel-modal');
+    const imgEl = document.getElementById('angel-img');
+    const captionEl = document.getElementById('angel-caption');
+    if (!modalEl || !imgEl || !captionEl) return;
+
+    // Preload angel image if not already
+    try {
+        if (!_angelPreloaded) {
+            _angelPreloaded = new Image();
+            _angelPreloaded.src = ANGEL_IMG_SRC;
+        }
+    } catch (e) { /* ignore */ }
+
+    // Fetch caption
+    try {
+        const res = await fetch(ANGEL_CAPTION_SRC);
+        captionEl.textContent = res.ok ? (await res.text()).trim() : '';
+    } catch (e) {
+        captionEl.textContent = '';
+    }
+
+    // Set image src (use preloaded if available)
+    imgEl.src = _angelPreloaded && _angelPreloaded.src ? _angelPreloaded.src : ANGEL_IMG_SRC;
+
+    // Show modal
+    modalEl.classList.remove('hidden');
+    modalEl.classList.add('visible');
+    isPaused = true;
+
+    // Trigger entrance animation on next frame
+    requestAnimationFrame(() => {
+        imgEl.classList.add('entered');
+    });
+
+    // Click background closes
+    const onModalClick = (e) => {
+        if (e.target === modalEl) {
+            stopAngelModal();
+            modalEl.removeEventListener('click', onModalClick);
+        }
+    };
+    modalEl.addEventListener('click', onModalClick);
+
+    // Spacebar closes (scoped handler)
+    _angelKeyHandler = function (e) {
+        if (e.code === 'Space') {
+            e.preventDefault();
+            stopAngelModal();
+        }
+    };
+    document.addEventListener('keydown', _angelKeyHandler);
+}
+
+function stopAngelModal() {
+    const modalEl = document.getElementById('angel-modal');
+    const imgEl = document.getElementById('angel-img');
+    if (imgEl) imgEl.classList.remove('entered');
+    if (modalEl) {
+        modalEl.classList.remove('visible');
+        modalEl.classList.add('hidden');
+    }
+    // cleanup key handler
+    if (_angelKeyHandler) {
+        document.removeEventListener('keydown', _angelKeyHandler);
+        _angelKeyHandler = null;
+    }
+    // resume
+    isPaused = false;
+    lastSurpriseClose = Date.now();
+}
+
+// --- Letter Modal (Surprise 5: My Sincere Words) ---
+async function startLetterModal() {
+    const modalEl = document.getElementById('letter-modal');
+    const textEl = document.getElementById('letter-text');
+    if (!modalEl || !textEl) return;
+
+    // Fetch the text file (preserve newlines)
+    try {
+        const res = await fetch('/caption_5.txt');
+        if (res.ok) {
+            _letterFullText = await res.text();
+        } else {
+            _letterFullText = '...';
+        }
+    } catch (e) {
+        console.warn('Failed to fetch caption_5.txt', e);
+        _letterFullText = '';
+    }
+
+    // Prepare UI
+    textEl.textContent = '';
+    _letterIndex = 0;
+    modalEl.classList.remove('hidden');
+    modalEl.classList.add('visible');
+    isPaused = true;
+
+    // Start typing interval (50ms per char)
+    _letterIntervalId = setInterval(() => {
+        if (_letterIndex >= _letterFullText.length) {
+            clearInterval(_letterIntervalId);
+            _letterIntervalId = null;
+            return;
+        }
+        textEl.textContent += _letterFullText[_letterIndex++];
+        // keep scroll at bottom while typing
+        textEl.scrollTop = textEl.scrollHeight;
+    }, 50);
+
+    // Click to fast-forward (display full text)
+    _letterClickHandler = () => {
+        if (_letterIntervalId) {
+            clearInterval(_letterIntervalId);
+            _letterIntervalId = null;
+        }
+        textEl.textContent = _letterFullText;
+        textEl.scrollTop = textEl.scrollHeight;
+    };
+    textEl.addEventListener('click', _letterClickHandler);
+
+    // Click outside content closes modal
+    const onModalClick = (e) => {
+        if (e.target === modalEl) {
+            stopLetterModal();
+            modalEl.removeEventListener('click', onModalClick);
+        }
+    };
+    modalEl.addEventListener('click', onModalClick);
+
+    // Spacebar closes (scoped handler)
+    _letterKeyHandler = function (e) {
+        if (e.code === 'Space') {
+            e.preventDefault();
+            stopLetterModal();
+        }
+    };
+    document.addEventListener('keydown', _letterKeyHandler);
+}
+
+function stopLetterModal() {
+    const modalEl = document.getElementById('letter-modal');
+    const textEl = document.getElementById('letter-text');
+
+    // Clear interval
+    if (_letterIntervalId) {
+        clearInterval(_letterIntervalId);
+        _letterIntervalId = null;
+    }
+
+    // Remove click handler
+    if (textEl && _letterClickHandler) {
+        textEl.removeEventListener('click', _letterClickHandler);
+        _letterClickHandler = null;
+    }
+
+    // Remove key handler
+    if (_letterKeyHandler) {
+        document.removeEventListener('keydown', _letterKeyHandler);
+        _letterKeyHandler = null;
+    }
+
+    // Hide modal
+    if (modalEl) {
+        modalEl.classList.remove('visible');
+        modalEl.classList.add('hidden');
+    }
+
+    // Resume gameplay after cooldown
+    isPaused = false;
+    lastSurpriseClose = Date.now();
+    // If all collected, ensure Santa is visible (defensive: in case Surprise 5 just finished)
+    try {
+        const count = Object.values(collectedGestures).filter(Boolean).length;
+        if (count === 6 && santaModel) {
+            santaModel.visible = true;
+        }
+    } catch (e) {}
+}
+
+function stopVoiceModal() {
+    const modalEl = document.getElementById('voice-modal');
+    const btn = document.getElementById('voice-play-btn');
+
+    // Stop audio
+    if (_voiceAudio) {
+        try { _voiceAudio.pause(); _voiceAudio.currentTime = 0; } catch (e) {}
+        try { _voiceAudio.src = ''; } catch (e) {}
+        _voiceAudio = null;
+    }
+
+    // Remove play handler
+    if (btn && _voicePlayHandler) {
+        btn.removeEventListener('click', _voicePlayHandler);
+        _voicePlayHandler = null;
+    }
+
+    // Hide modal
+    if (modalEl) {
+        modalEl.classList.remove('visible');
+        modalEl.classList.add('hidden');
+    }
+
+    // Remove key handler
+    if (_voiceKeyHandler) {
+        document.removeEventListener('keydown', _voiceKeyHandler);
+        _voiceKeyHandler = null;
+    }
+
+    // Return focus
+    try { window.focus(); } catch (e) {}
+    // resume gesture processing after a short cooldown
+    isPaused = false;
+    lastSurpriseClose = Date.now();
 }
 
 // Load intro text and start typewriter
@@ -406,7 +996,7 @@ function onHandsResults(results) {
         } else if (isInstructionsMode) {
             processInstructionsGesture(landmarks);
         } else if (isFinaleMode) {
-            processThumbsUp(landmarks);
+            // Finale waiting for direct trigger (no live-hand star drag)
         } else {
             processGestureCollection(landmarks);
         }
@@ -516,6 +1106,11 @@ function startGameplay() {
 }
 
 function processGestureCollection(landmarks) {
+    // cooldown after closing a surprise modal
+    if (Date.now() - lastSurpriseClose < SURPRISE_COOLDOWN) {
+        resetGestureTimer();
+        return;
+    }
     // Check all uncollected gestures
     let detected = null;
     for (const char of GESTURE_SEQUENCE) {
@@ -545,43 +1140,18 @@ function processGestureCollection(landmarks) {
     }
 }
 
-function processThumbsUp(landmarks) {
-    if (!isFinaleReady) return;
-    
-    const isThumbsUp = checkThumbsUp(landmarks);
-    
-    if (isThumbsUp) {
-        if (!gestureStartTime) {
-            gestureStartTime = Date.now();
-            console.log('👍 Thumbs up detected - Hold for 3s!');
-        }
-        
-        const elapsed = Date.now() - gestureStartTime;
-        const progress = Math.min(elapsed / HOLD_DURATION, 1); // 3 seconds
-        updateHoldFeedback(progress, '👍');
-        
-        if (elapsed >= HOLD_DURATION) {
-            showFinale();
-        }
-    } else {
-        resetGestureTimer();
-    }
-}
-
-function checkThumbsUp(landmarks) {
-    // Thumb extended upward, other fingers curled
-    const thumbTip = landmarks[4];
-    const thumbMcp = landmarks[2];
-    const indexTip = landmarks[8];
-    const indexPip = landmarks[6];
-    const middleTip = landmarks[12];
-    const middlePip = landmarks[10];
-    
-    const thumbUp = thumbTip.y < thumbMcp.y - 0.05;
-    const indexCurled = indexTip.y > indexPip.y;
-    const middleCurled = middleTip.y > middlePip.y;
-    
-    return thumbUp && indexCurled && middleCurled;
+// --- Finale direct trigger ---
+function openFinalPhotoModal() {
+    const modalEl = document.getElementById('final-collage-modal');
+    if (!modalEl) return;
+    const img = document.getElementById('final-collage-img');
+    if (img) img.src = '/final_photo.jpg';
+    modalEl.classList.remove('hidden');
+    // hide scene and pause
+    try { document.getElementById('scene-container').style.display = 'none'; } catch (e) {}
+    try { document.getElementById('camera-pip').style.display = 'none'; } catch (e) {}
+    try { finalePrompt.style.display = 'none'; } catch (e) {}
+    isPaused = true;
 }
 
 function resetGestureTimer() {
@@ -610,46 +1180,93 @@ async function onGestureCollected(char) {
     console.log(`✅ Collected '${char}'!`);
     isPaused = true;
     resetGestureTimer();
-    
-    // Mark as collected
+
+    // Was this dot already lit?
+    const wasAlready = !!collectedGestures[char];
+
+    // Mark visual dot as collected
     collectedGestures[char] = true;
-    
-    // Capture photo
+
+    // Light HUD dot by index mapping (story-mode visuals)
+    try {
+        const idx = GESTURE_TO_INDEX[char];
+        const hudItems = document.querySelectorAll('.hud-item');
+        if (hudItems && hudItems[idx]) hudItems[idx].classList.add('active');
+    } catch (e) {
+        // ignore if HUD not present
+    }
+
+    // Capture photo and upload (visual asset)
     const imageData = captureFrame();
     collectedPhotos[char] = imageData;
-    
-    // Upload to Firebase (silent)
     uploadToFirebase(char, imageData);
-    
-    // Update scene brightness
     updateSceneBrightness();
-    
-    // Check if all 6 collected - show Santa, stars, and finale prompt!
+
+    // If this was newly lit, trigger the next surprise in the fixed queue
+    let surpriseTriggered = false;
+    if (!wasAlready) {
+        if (currentStoryStep < surprises.length) {
+            const surpriseName = surprises[currentStoryStep];
+            console.log(`🎁 Triggering surprise #${currentStoryStep}: ${surpriseName}`);
+            // If the surprise is the photo animation, start the modal animation (fetch caption inside)
+            if (surpriseName === 'Animation') {
+                try { await startPhotoAnimation(); surpriseTriggered = true; } catch (e) { console.error('Failed to start photo animation', e); }
+            } else if (surpriseName === 'Voice') {
+                try { await startVoiceModal(); surpriseTriggered = true; } catch (e) { console.error('Failed to start voice modal', e); }
+            } else if (surpriseName === 'RunawayBtn') {
+                try { await startRunawayModal(); surpriseTriggered = true; } catch (e) { console.error('Failed to start runaway modal', e); }
+                } else if (surpriseName === 'Angel') {
+                    try { await startAngelModal(); surpriseTriggered = true; } catch (e) { console.error('Failed to start angel modal', e); }
+            } else if (surpriseName === 'TrueWords') {
+                try { await startLetterModal(); surpriseTriggered = true; } catch (e) { console.error('Failed to start letter modal', e); }
+            } else if (surpriseName === 'LightStar') {
+                try {
+                    // As a fallback, save collected photos and navigate to final page
+                    try { sessionStorage.setItem('finalPhotos', JSON.stringify(collectedPhotos)); } catch (e) { console.warn('could not save finalPhotos', e); }
+                    window.location.href = '/merry_christmas.html';
+                    surpriseTriggered = true;
+                } catch (e) { console.error('Failed to open final page', e); }
+            } else {
+                // non-blocking placeholder: log instead of alert to keep flow seamless
+                console.log('Surprise:', surpriseName);
+            }
+            currentStoryStep = Math.min(currentStoryStep + 1, surprises.length);
+        } else {
+            console.log('All surprises have been triggered');
+        }
+    }
+
+    // Check if all 6 collected - immediately navigate to final page
     const count = Object.keys(collectedPhotos).length;
     if (count === 6 && santaModel && !isFinaleReady) {
-        // Show Santa with animation
-        santaModel.visible = true;
-        santaModel.scale.set(0, 0, 0);
-        animateSantaSpawn();
-        
-        // Show stars
-        if (starField) {
-            starField.visible = true;
-            console.log('🌟 Stars revealed!');
+        // Show Santa with animation briefly (optional)
+        try { santaModel.visible = true; santaModel.scale.set(0,0,0); animateSantaSpawn(); } catch (e) {}
+
+        // Show stars if present (optional)
+        try { if (starField) starField.visible = true; } catch (e) {}
+
+        // Store collected photos into sessionStorage so the final page can read them
+        try {
+            sessionStorage.setItem('finalPhotos', JSON.stringify(collectedPhotos));
+        } catch (e) { console.warn('Failed to save final photos to sessionStorage', e); }
+
+        // Immediately navigate to the final 'Merry Christmas' page
+        try {
+            window.location.href = '/merry_christmas.html';
+        } catch (e) {
+            console.error('Failed to navigate to final page', e);
         }
-        
-        // Show finale prompt
-        finalePrompt.classList.remove('hidden');
-        setTimeout(() => finalePrompt.classList.add('visible'), 100);
-        
-        // Enter finale ready state
+
+        // Mark finale state to avoid duplicate triggers
         isFinaleReady = true;
         isFinaleMode = true;
-        console.log('🎄 Finale ready! Show thumbs up to complete.');
+        console.log('🎄 All collected — redirecting to finale page...');
     }
-    
-    // Show modal
-    showModal(char);
+
+    // Only show the letter modal if no surprise modal was triggered
+    if (!surpriseTriggered) {
+        showModal(char);
+    }
 }
 
 function captureFrame() {
@@ -701,7 +1318,7 @@ function enterFinaleMode() {
     const info = document.querySelector('.game-info');
     info.innerHTML = `
         <div class="collected-count">All fragments collected! 🎄</div>
-        <div class="hint">Give me a Thumbs Up 👍 to see the surprise!</div>
+        <div class="hint">Perform the final gesture to see the surprise!</div>
     `;
 }
 
