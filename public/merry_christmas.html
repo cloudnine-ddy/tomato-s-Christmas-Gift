@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Merry Christmas 🎄</title>
+  <link rel="stylesheet" href="/style.css">
+    <style>
+    body { background: radial-gradient(ellipse at bottom, #0b1226 0%, #031027 60%), url('/animation-photos/1.jpg'); background-size: cover; color: #fff; }
+    .page { min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px; }
+    h1 { font-size:3.2rem; margin-bottom:12px; text-shadow: 0 6px 30px rgba(0,0,0,0.6); }
+    /* Single-row collage to read as I  LOVE  U */
+    .collage { display:flex; gap:12px; width: min(1400px, 96%); justify-content:center; align-items:flex-start; flex-wrap:nowrap; }
+    .photo { background: rgba(255,255,255,0.06); padding:6px; border-radius:8px; overflow:hidden; display:flex; flex-direction:column; align-items:center; justify-content:flex-start; height:240px; width: calc((100% - 60px) / 6); }
+    .photo img { width:100%; height: calc(100% - 28px); object-fit:cover; transform: scaleX(-1); border-radius:6px; }
+    .photo .label { margin-top:6px; font-weight:700; color:#ffd54d; letter-spacing:1px; }
+    /* Extra spacing to visually separate groups: between I & L, and between E & U */
+    .collage .photo:nth-child(1) { margin-right:36px; }
+    .collage .photo:nth-child(5) { margin-right:36px; }
+    .cta { margin-top:20px; font-size:1.1rem; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>🎄 Merry Christmas! 🎄</h1>
+    <div class="collage" id="collage"></div>
+    <div class="cta">I LOVE U ❤️</div>
+  </div>
+  <script>
+    (function(){
+      try {
+        const raw = sessionStorage.getItem('finalPhotos');
+        const container = document.getElementById('collage');
+        if (!raw) {
+          container.innerHTML = '<div style="color:#ffd54d;">No photos available.</div>';
+          return;
+        }
+        const photos = JSON.parse(raw);
+        // Order by I L O V E U if available
+        const order = ['I','L','O','V','E','U'];
+        for (const k of order) {
+          const src = photos[k];
+          const div = document.createElement('div');
+          div.className = 'photo';
+          if (src) {
+            const img = document.createElement('img');
+            img.src = src;
+            img.alt = k;
+            div.appendChild(img);
+            const lab = document.createElement('div');
+            lab.className = 'label';
+            lab.textContent = k;
+            div.appendChild(lab);
+          } else {
+            div.innerHTML = '<div style="opacity:0.6">Missing</div>';
+          }
+          container.appendChild(div);
+        }
+      } catch (e) {
+        console.error('Failed to render final collage', e);
+        document.getElementById('collage').innerText = 'Failed to load photos.';
+      }
+    })();
+  </script>
+</body>
+</html>
