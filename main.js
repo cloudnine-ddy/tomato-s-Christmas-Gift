@@ -1223,7 +1223,7 @@ async function onGestureCollected(char) {
                 try {
                     // As a fallback, save collected photos and navigate to final page
                     try { sessionStorage.setItem('finalPhotos', JSON.stringify(collectedPhotos)); } catch (e) { console.warn('could not save finalPhotos', e); }
-                    window.location.href = '/merry_christmas.html';
+                    window.location.href = 'merry_christmas.html';
                     surpriseTriggered = true;
                 } catch (e) { console.error('Failed to open final page', e); }
             } else {
@@ -1252,7 +1252,7 @@ async function onGestureCollected(char) {
 
         // Immediately navigate to the final 'Merry Christmas' page
         try {
-            window.location.href = '/merry_christmas.html';
+            window.location.href = 'merry_christmas.html';
         } catch (e) {
             console.error('Failed to navigate to final page', e);
         }
